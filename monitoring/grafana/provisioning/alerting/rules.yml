@@ -1,0 +1,63 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: API Health Alerts
+    folder: Alerts
+    interval: 1m
+    rules:
+      - uid: api-health-failure-rule
+        title: API Health Check Failure
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: "-- Grafana --"
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 1
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              hide: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: avg_over_time(api_health_status[1m])
+              instant: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+        dashboardUid: api-incident-dashboard
+        panelId: 1
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 1m
+        annotations:
+          description: "API health status has been below 1 (unhealthy) for more than 1 minute. Incident pipeline triggered."
+          summary: "API is reporting unhealthy status"
+        labels:
+          severity: critical
+          service: api-service
+        isPaused: false

@@ -1,0 +1,129 @@
+# docker-compose — AI Incident System
+
+services:
+  # ─── API Service (Simulated unstable API) ─────────────────────────────────
+  api-service:
+    build:
+      context: ./apps/api-service
+      dockerfile: Dockerfile
+    container_name: ai-incident-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - logs-data:/logs
+    networks:
+      - incident-net
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://localhost:3000/" ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ─── Incident Service (AI + GitHub + Atlas DB) ────────────────────────────
+  incident-service:
+    build:
+      context: ./apps/incident-service
+      dockerfile: Dockerfile
+    container_name: ai-incident-processor
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    volumes:
+      - logs-data:/logs:ro
+    networks:
+      - incident-net
+    environment:
+      - PORT=4000
+      - MONGO_URI=${MONGO_URI}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_OWNER=${GITHUB_OWNER}
+      - GITHUB_REPO=${GITHUB_REPO}
+      - NODE_ENV=production
+    depends_on:
+      - api-service
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://localhost:4000/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ─── Prometheus ────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: ai-incident-prometheus
+    restart: unless-stopped
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - incident-net
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - api-service
+
+  # ─── Grafana ───────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: ai-incident-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - incident-net
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ALERTING_ENABLED=false
+      - GF_UNIFIED_ALERTING_ENABLED=true
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_DOMAIN=localhost
+      - GF_SMTP_ENABLED=false
+    depends_on:
+      - prometheus
+
+  # ─── Dashboard (React UI) ──────────────────────────────────────────────────
+  dashboard:
+    build:
+      context: ./apps/dashboard
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=http://localhost:4000
+        - VITE_API_SERVICE_URL=http://localhost:3000
+    container_name: ai-incident-dashboard
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    networks:
+      - incident-net
+    depends_on:
+      - incident-service
+    environment:
+      - NGINX_HOST=localhost
+      - NGINX_PORT=80
+
+networks:
+  incident-net:
+    driver: bridge
+    name: ai-incident-network
+
+volumes:
+  logs-data:
+    name: ai-incident-logs
+  grafana-data:
+    name: ai-incident-grafana-data
