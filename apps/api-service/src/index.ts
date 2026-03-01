@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
+import cors from 'cors';
 import { register } from './metrics';
 import { httpRequestCounter, httpRequestDuration } from './metrics';
 import healthRouter from './routes/health';
@@ -6,6 +7,13 @@ import processRouter from './routes/process';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// CORS — allow any origin so the React dashboard can talk to this service
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
 // Middleware
 app.use(express.json());

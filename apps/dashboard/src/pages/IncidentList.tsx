@@ -54,17 +54,25 @@ export default function IncidentList() {
 
     const handleTriggerFailure = async () => {
         setTriggering(true);
-        addToast('info', 'Sending simulated API failure...', '🚦');
+        addToast('info', 'Triggering API failures and firing incident pipeline...', '🚦');
         try {
-            // Fire multiple requests to increase failure probability
+            // 1. Fire multiple process failures (generates real error logs)
             await Promise.allSettled([
                 simulateApi.triggerFailure(),
                 simulateApi.triggerFailure(),
                 simulateApi.triggerFailure(),
             ]);
-            addToast('success', 'API failures triggered! Prometheus will detect and alert within ~60s.', '✅');
+
+            // 2. Directly fire the webhook → OpenAI analysis → GitHub issue (no 60s Prometheus wait)
+            await simulateApi.triggerWebhook();
+
+            addToast('success', 'Incident pipeline triggered! AI is analyzing and creating a GitHub issue now. Refreshing in 5s...', '✅');
+
+            // 3. Auto-refresh after a few seconds to show the new incident
+            setTimeout(fetchIncidents, 5000);
+            setTimeout(fetchIncidents, 12000);
         } catch {
-            addToast('error', 'Could not reach api-service. Is docker-compose running?', '❌');
+            addToast('error', 'Could not reach incident service. Is docker-compose running?', '❌');
         } finally {
             setTriggering(false);
         }

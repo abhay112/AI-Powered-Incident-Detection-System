@@ -89,30 +89,41 @@ export async function analyzeIncident(
     payload: Record<string, unknown>
 ): Promise<AIAnalysis> {
     if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY === 'your_openai_api_key_here') {
-        console.warn('⚠️  OpenAI API key not set. Using mock analysis for development.');
+        console.warn('⚠️  OpenAI API key not set. Using mock analysis.');
         return getMockAnalysis(logs);
     }
 
-    const userPrompt = buildUserPrompt(logs, commitDiff, payload);
+    try {
+        const userPrompt = buildUserPrompt(logs, commitDiff, payload);
 
-    const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.3,
-        response_format: { type: 'json_object' },
-        max_tokens: 1000,
-    });
+        const response = await openai.chat.completions.create({
+            model: 'gpt-4o',
+            messages: [
+                { role: 'system', content: SYSTEM_PROMPT },
+                { role: 'user', content: userPrompt },
+            ],
+            temperature: 0.3,
+            response_format: { type: 'json_object' },
+            max_tokens: 1000,
+        });
 
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-        throw new Error('Empty response from OpenAI');
+        const content = response.choices[0]?.message?.content;
+        if (!content) {
+            throw new Error('Empty response from OpenAI');
+        }
+
+        const parsed = JSON.parse(content);
+        return validateAIResponse(parsed);
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        // Detect quota / billing errors specifically
+        if (message.includes('insufficient_quota') || message.includes('billing')) {
+            console.warn('⚠️  OpenAI quota exceeded — falling back to mock analysis. Add credits at platform.openai.com/settings/billing');
+        } else {
+            console.warn('⚠️  OpenAI call failed, falling back to mock analysis:', message);
+        }
+        return getMockAnalysis(logs);
     }
-
-    const parsed = JSON.parse(content);
-    return validateAIResponse(parsed);
 }
 
 /**

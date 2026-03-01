@@ -43,6 +43,9 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GITHUB_OWNER=${GITHUB_OWNER}
       - GITHUB_REPO=${GITHUB_REPO}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - NOTIFICATION_EMAILS=${NOTIFICATION_EMAILS}
+      - RESEND_FROM_EMAIL=${RESEND_FROM_EMAIL}
       - NODE_ENV=production
     depends_on:
       - api-service
@@ -108,7 +111,7 @@ services:
     container_name: ai-incident-dashboard
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "8081:80"
     networks:
       - incident-net
     depends_on:

@@ -49,6 +49,19 @@ export const simulateApi = {
         }
     },
 
+    // Directly fires the incident webhook — triggers immediate AI analysis + GitHub issue
+    triggerWebhook: async (): Promise<void> => {
+        await api.post('/webhook/alert', {
+            status: 'firing',
+            alerts: [{
+                status: 'firing',
+                labels: { alertname: 'APIHealthFailure', severity: 'critical' },
+                annotations: { summary: 'API health check triggered from dashboard' },
+                startsAt: new Date().toISOString(),
+            }],
+        });
+    },
+
     checkHealth: async (): Promise<{ status: string }> => {
         const apiServiceUrl = (import.meta as unknown as { env: Record<string, string> }).env?.VITE_API_SERVICE_URL || 'http://localhost:3000';
         try {

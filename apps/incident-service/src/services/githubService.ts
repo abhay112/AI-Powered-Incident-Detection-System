@@ -98,12 +98,20 @@ export async function createGitHubIssue(
         analysis.category.toLowerCase().replace(' ', '-'),
     ];
 
+    // Assignees: always include repo owner + any extra from GITHUB_ASSIGNEES env var.
+    // GitHub will email every assignee automatically — no external email service needed.
+    const assignees = Array.from(new Set([
+        owner,
+        ...(process.env.GITHUB_ASSIGNEES || '').split(',').map(a => a.trim()).filter(Boolean),
+    ]));
+
     const response = await axios.post<GitHubIssueResponse>(
         `${GITHUB_API_BASE}/repos/${owner}/${repo}/issues`,
         {
             title,
             body,
             labels,
+            assignees, // 👈 triggers GitHub's built-in email to all assignees
         },
         {
             headers: {
@@ -116,4 +124,50 @@ export async function createGitHubIssue(
 
     console.log(`✅ GitHub issue #${response.data.number} created: ${response.data.html_url}`);
     return response.data.html_url;
+}
+
+/**
+ * Close a GitHub issue when an incident is resolved.
+ * Parses the issue number from the stored html_url.
+ */
+export async function closeGitHubIssue(githubIssueUrl: string): Promise<void> {
+    const token = process.env.GITHUB_TOKEN;
+    const owner = process.env.GITHUB_OWNER;
+    const repo = process.env.GITHUB_REPO;
+
+    if (!token || !owner || !repo ||
+        token === 'your_github_token_here' ||
+        githubIssueUrl.includes('placeholder')) {
+        console.warn('⚠️  GitHub credentials not configured or placeholder URL — skipping issue close.');
+        return;
+    }
+
+    // Extract issue number from URL: https://github.com/owner/repo/issues/42
+    const match = githubIssueUrl.match(/\/issues\/(\d+)$/);
+    if (!match) {
+        console.warn('⚠️  Could not extract issue number from URL:', githubIssueUrl);
+        return;
+    }
+    const issueNumber = match[1];
+
+    const headers = {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github.v3+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+    };
+
+    // Add a resolution comment then close the issue
+    await axios.post(
+        `${GITHUB_API_BASE}/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+        { body: '✅ **Incident resolved** — this issue has been marked as resolved by the AI SRE System.' },
+        { headers }
+    );
+
+    await axios.patch(
+        `${GITHUB_API_BASE}/repos/${owner}/${repo}/issues/${issueNumber}`,
+        { state: 'closed', state_reason: 'completed' },
+        { headers }
+    );
+
+    console.log(`✅ GitHub issue #${issueNumber} closed: ${githubIssueUrl}`);
 }

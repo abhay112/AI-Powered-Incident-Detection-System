@@ -4,6 +4,7 @@ import { Incident } from '../models/Incident';
 import { collectIncidentContext } from '../services/contextCollector';
 import { analyzeIncident } from '../services/aiAnalyzer';
 import { createGitHubIssue } from '../services/githubService';
+import { sendIncidentEmail } from '../services/emailService';
 
 const router = Router();
 
@@ -20,12 +21,36 @@ interface WebhookPayload {
     message?: string;
 }
 
+// ─── Deduplication guard ──────────────────────────────────────────────────────
+// Prevents calling OpenAI/GitHub multiple times if Grafana retries the same alert.
+// Each fingerprint is kept for 2 minutes, then auto-cleaned.
+const recentAlerts = new Set<string>();
+
+function makeFingerprint(body: WebhookPayload): string {
+    const alert = body.alerts?.[0];
+    const alertName = alert?.labels?.alertname || body.status || 'unknown';
+    const minuteBucket = Math.floor(Date.now() / (2 * 60 * 1000)); // 2-min window
+    return `${alertName}-${minuteBucket}`;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * POST /webhook/alert
  * Receives Grafana alert webhooks and kicks off the incident pipeline
  */
 router.post('/alert', async (req: Request, res: Response) => {
     const body = req.body as WebhookPayload;
+
+    // ── Deduplication check ──────────────────────────────────────────────────
+    const fingerprint = makeFingerprint(body);
+    if (recentAlerts.has(fingerprint)) {
+        console.log(`⏭️  Duplicate alert ignored (${fingerprint}) — skipping OpenAI call`);
+        return res.status(200).json({ received: true, message: 'Duplicate alert ignored — already processing this incident.' });
+    }
+    recentAlerts.add(fingerprint);
+    setTimeout(() => recentAlerts.delete(fingerprint), 2 * 60 * 1000); // clean up after 2 min
+    // ────────────────────────────────────────────────────────────────────────
+
     console.log('📨 Received webhook alert:', JSON.stringify(body, null, 2));
 
     // Acknowledge immediately so Grafana doesn't retry
@@ -68,6 +93,11 @@ router.post('/alert', async (req: Request, res: Response) => {
 
             await incident.save();
             console.log(`✅ Incident ${alertId} saved to database`);
+
+            console.log('📧 Step 5: Sending email notification...');
+            sendIncidentEmail(aiAnalysis, endpoint, githubIssueUrl).catch(err =>
+                console.error('Email notification failed (non-critical):', err)
+            );
 
         } catch (error) {
             console.error('❌ Error processing incident:', error);
