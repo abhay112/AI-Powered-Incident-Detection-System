@@ -50,13 +50,23 @@ export const simulateApi = {
     },
 
     // Directly fires the incident webhook — triggers immediate AI analysis + GitHub issue
-    triggerWebhook: async (): Promise<void> => {
+    triggerWebhook: async (type: 'payment_error' | 'inventory_error' | 'session_error' = 'payment_error'): Promise<void> => {
+        const labels: Record<string, string> = {
+            alertname: type === 'payment_error' ? 'PaymentGatewayFailure' :
+                type === 'inventory_error' ? 'InventoryServiceFailure' : 'UserSessionFailure',
+            severity: 'critical',
+            service: 'api-service',
+            incident_type: type // 👈 passed to help the processor choose logs
+        };
+
         await api.post('/webhook/alert', {
             status: 'firing',
             alerts: [{
                 status: 'firing',
-                labels: { alertname: 'APIHealthFailure', severity: 'critical' },
-                annotations: { summary: 'API health check triggered from dashboard' },
+                labels,
+                annotations: {
+                    summary: `Manual ${type.replace('_', ' ')} incident triggered from dashboard`
+                },
                 startsAt: new Date().toISOString(),
             }],
         });

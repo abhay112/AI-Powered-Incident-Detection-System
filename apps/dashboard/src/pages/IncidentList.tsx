@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
 import { incidentApi, simulateApi } from '../api/client';
 import { Incident } from '../types';
 import IncidentTable from '../components/IncidentTable';
@@ -52,27 +53,31 @@ export default function IncidentList() {
         return () => clearInterval(interval);
     }, [autoRefresh, fetchIncidents]);
 
-    const handleTriggerFailure = async () => {
+    const handleTriggerFailure = async (type: 'payment_error' | 'inventory_error' | 'session_error') => {
         setTriggering(true);
-        addToast('info', 'Triggering API failures and firing incident pipeline...', '🚦');
+        const label = type === 'payment_error' ? 'Payment' : type === 'inventory_error' ? 'Add to Cart' : 'Session';
+        addToast('info', `Simulating ${label} failure and firing incident pipeline...`, '🚦');
+
         try {
-            // 1. Fire multiple process failures (generates real error logs)
-            await Promise.allSettled([
-                simulateApi.triggerFailure(),
-                simulateApi.triggerFailure(),
-                simulateApi.triggerFailure(),
-            ]);
+            // 1. Fire the specific process failure (generates real error logs in api-service)
+            const apiServiceUrl = (import.meta as unknown as { env: Record<string, string> }).env?.VITE_API_SERVICE_URL || 'http://localhost:3000';
+            await axios.post(`${apiServiceUrl}/process?forceFailure=${type}`, {
+                simulatedRequest: true,
+                userId: Math.floor(Math.random() * 1000),
+                type,
+                timestamp: new Date().toISOString(),
+            }).catch(() => { }); // Expected to fail with 500
 
-            // 2. Directly fire the webhook → OpenAI analysis → GitHub issue (no 60s Prometheus wait)
-            await simulateApi.triggerWebhook();
+            // 2. Directly fire the webhook → OpenAI analysis → GitHub issue
+            await simulateApi.triggerWebhook(type);
 
-            addToast('success', 'Incident pipeline triggered! AI is analyzing and creating a GitHub issue now. Refreshing in 5s...', '✅');
+            addToast('success', `${label} failure triggered! AI is analyzing. Refreshing in 5s...`, '✅');
 
-            // 3. Auto-refresh after a few seconds to show the new incident
+            // 3. Auto-refresh
             setTimeout(fetchIncidents, 5000);
             setTimeout(fetchIncidents, 12000);
         } catch {
-            addToast('error', 'Could not reach incident service. Is docker-compose running?', '❌');
+            addToast('error', 'Could not reach incident service.', '❌');
         } finally {
             setTriggering(false);
         }
@@ -142,17 +147,20 @@ export default function IncidentList() {
                 </div>
                 <div className="trigger-actions">
                     <button
-                        id="trigger-failure-btn"
-                        className="btn btn-danger"
-                        onClick={handleTriggerFailure}
+                        id="trigger-cart-failure"
+                        className="btn btn-warning"
+                        onClick={() => handleTriggerFailure('inventory_error')}
                         disabled={triggering}
-                        aria-label="Trigger simulated API failure"
                     >
-                        {triggering ? (
-                            <><span className="spinner" style={{ width: 14, height: 14 }} /> Sending...</>
-                        ) : (
-                            <>💥 Trigger Failure</>
-                        )}
+                        🛒 Add to Cart Fail
+                    </button>
+                    <button
+                        id="trigger-payment-failure"
+                        className="btn btn-danger"
+                        onClick={() => handleTriggerFailure('payment_error')}
+                        disabled={triggering}
+                    >
+                        💳 Payment Fail
                     </button>
                     <button
                         id="refresh-btn"

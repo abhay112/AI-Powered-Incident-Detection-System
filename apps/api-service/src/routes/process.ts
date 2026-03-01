@@ -5,53 +5,52 @@ import { writeErrorLog, writeInfoLog } from '../logger';
 
 const router = Router();
 
-// Simulate different types of failures
-const FAILURE_SCENARIOS = [
-    {
-        name: 'NullPointerException',
-        error: 'Cannot read property "id" of undefined',
-        stack: `TypeError: Cannot read property 'id' of undefined
-    at processUserData (/app/src/services/userService.ts:45:23)
-    at async processRequest (/app/src/routes/process.ts:32:5)
+// Realistic business failure scenarios
+const FAILURE_SCENARIOS: Record<string, { error: string; stack: string; name: string }> = {
+    payment_error: {
+        name: 'PaymentGatewayTimeout',
+        error: 'External Service Error: Stripe API request timed out after 10000ms',
+        stack: `TimeoutError: Stripe Gateway did not respond
+    at PaymentService.process (/app/src/services/payment.ts:142:11)
+    at async /app/src/routes/process.ts:55:12
     at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)`,
     },
-    {
-        name: 'DatabaseConnectionError',
-        error: 'MongoNetworkError: connect ECONNREFUSED 127.0.0.1:27017',
-        stack: `MongoNetworkError: connect ECONNREFUSED 127.0.0.1:27017
-    at TCPConnectWrap.afterConnect [as oncomplete] (net.js:1148:16)
-    at connectToFirstAvailable (/app/node_modules/mongoose/lib/connection.js:784:12)
+    inventory_error: {
+        name: 'InventoryLockFailure',
+        error: 'Database Error: Could not acquire row lock for product ID 4022 (Add to Cart failed)',
+        stack: `LockWaitTimeoutError: Lock wait timeout exceeded; try restarting transaction
+    at InventoryModel.updateStock (/app/src/models/inventory.ts:88:5)
+    at CartService.addItem (/app/src/services/cart.ts:22:9)
+    at processRequest (/app/src/routes/process.ts:62:3)`,
+    },
+    session_error: {
+        name: 'CartSessionExpired',
+        error: 'Authentication Error: Redis session key "sess:9921" expired during checkout',
+        stack: `SessionExpiredError: User session is no longer valid
+    at SessionMiddleware.verify (/app/src/middleware/auth.ts:12:33)
     at processRequest (/app/src/routes/process.ts:45:5)`,
     },
-    {
-        name: 'ValidationError',
-        error: 'ValidationError: "amount" must be a positive number',
-        stack: `ValidationError: "amount" must be a positive number
-    at Object.validate (/app/src/validators/paymentValidator.ts:23:11)
-    at validatePayload (/app/src/middleware/validation.ts:15:5)
-    at processRequest (/app/src/routes/process.ts:28:3)`,
-    },
-    {
-        name: 'TimeoutError',
-        error: 'Request timeout: downstream service did not respond within 5000ms',
-        stack: `TimeoutError: Request timeout: downstream service did not respond within 5000ms
-    at Timeout._onTimeout (/app/src/services/httpClient.ts:67:13)
-    at listOnTimeout (internal/timers.js:554:17)
-    at processTimers (internal/timers.js:497:7)`,
-    },
-];
+};
 
-// Simulate failure: ~40% chance on process endpoint
-const FAILURE_RATE = 0.4;
+// Set to 0 to prevent accidental background incidents
+// Incidents will only be triggered when manually requested
+const FAILURE_RATE = 0;
 
 router.post('/', (req: Request, res: Response) => {
     const requestId = uuidv4();
     const timestamp = new Date().toISOString();
     const payload = req.body;
-    const shouldFail = Math.random() < FAILURE_RATE;
+
+    // Check if a specific failure is being forced (e.g., /process?forceFailure=payment_error)
+    const forcedType = req.query.forceFailure as string;
+    const shouldFail = (Math.random() < FAILURE_RATE) || !!forcedType;
 
     if (shouldFail) {
-        const scenario = FAILURE_SCENARIOS[Math.floor(Math.random() * FAILURE_SCENARIOS.length)];
+        const scenarioKey = forcedType && FAILURE_SCENARIOS[forcedType]
+            ? forcedType
+            : Object.keys(FAILURE_SCENARIOS)[Math.floor(Math.random() * Object.keys(FAILURE_SCENARIOS).length)];
+
+        const scenario = FAILURE_SCENARIOS[scenarioKey];
 
         httpErrorCounter.inc({ method: 'POST', route: '/process' });
         httpRequestCounter.inc({ method: 'POST', route: '/process', status_code: '500' });
@@ -73,7 +72,7 @@ router.post('/', (req: Request, res: Response) => {
             timestamp,
             error: scenario.error,
             errorType: scenario.name,
-            message: 'Request processing failed due to an internal error',
+            message: `Service failure: ${scenario.name}`,
         });
     }
 

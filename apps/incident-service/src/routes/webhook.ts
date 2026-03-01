@@ -63,7 +63,8 @@ router.post('/alert', async (req: Request, res: Response) => {
             const timestamp = new Date();
 
             console.log('🔍 Step 1: Collecting incident context...');
-            const { logs, commitDiff, payload, endpoint } = collectIncidentContext();
+            const incidentType = body.alerts?.[0]?.labels?.incident_type;
+            const { logs, commitDiff, payload, endpoint } = collectIncidentContext(incidentType);
 
             console.log('🤖 Step 2: Sending context to AI for analysis...');
             const aiAnalysis = await analyzeIncident(logs, commitDiff, payload);
